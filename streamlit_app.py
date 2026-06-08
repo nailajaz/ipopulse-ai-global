@@ -5,6 +5,7 @@ import yfinance as yf
 
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 from io import BytesIO
 
@@ -19,7 +20,8 @@ st.title("IPOPulse-AI Global")
 st.subheader("AI-Enabled Decision-Support Framework for IPO Performance Prediction")
 
 st.caption(
-    "Prototype using Yahoo Finance/yfinance, Python, KNN, benchmarking, and IPOPulse Score."
+    "Prototype using Yahoo Finance/yfinance, Python, technical indicators, "
+    "KNN baseline, Random Forest enhancement, benchmarking, and IPOPulse Score."
 )
 
 st.warning(
@@ -156,6 +158,52 @@ def create_features(master):
         .transform(lambda x: x.rolling(5).std())
     )
 
+    master["MA5"] = (
+        master.groupby("Ticker")["Close"]
+        .transform(lambda x: x.rolling(5).mean())
+    )
+
+    master["MA20"] = (
+        master.groupby("Ticker")["Close"]
+        .transform(lambda x: x.rolling(20).mean())
+    )
+
+    master["Momentum"] = (
+        master.groupby("Ticker")["Close"]
+        .pct_change(5)
+    )
+
+    master["Price_Trend"] = master["MA5"] / master["MA20"]
+
+    delta = master.groupby("Ticker")["Close"].diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+
+    avg_gain = (
+        gain.groupby(master["Ticker"])
+        .transform(lambda x: x.rolling(14).mean())
+    )
+
+    avg_loss = (
+        loss.groupby(master["Ticker"])
+        .transform(lambda x: x.rolling(14).mean())
+    )
+
+    rs = avg_gain / avg_loss
+    master["RSI"] = 100 - (100 / (1 + rs))
+
+    ema12 = (
+        master.groupby("Ticker")["Close"]
+        .transform(lambda x: x.ewm(span=12, adjust=False).mean())
+    )
+
+    ema26 = (
+        master.groupby("Ticker")["Close"]
+        .transform(lambda x: x.ewm(span=26, adjust=False).mean())
+    )
+
+    master["MACD"] = ema12 - ema26
+
     master["Target"] = np.where(
         master.groupby("Ticker")["Return"].shift(-1) > 0,
         1,
@@ -167,30 +215,75 @@ def create_features(master):
     return master
 
 
-def train_model(master):
-    X = master[["Close", "Volume", "Volume_Surge", "Volatility_5D"]]
+FEATURE_COLUMNS = [
+    "Close",
+    "Volume",
+    "Volume_Surge",
+    "Volatility_5D",
+    "MA5",
+    "MA20",
+    "Momentum",
+    "Price_Trend",
+    "RSI",
+    "MACD"
+]
+
+
+def train_models(master):
+    X = master[FEATURE_COLUMNS]
     y = master["Target"]
 
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
         test_size=0.30,
-        random_state=42
+        random_state=42,
+        stratify=y if y.nunique() > 1 else None
     )
 
-    model = KNeighborsClassifier(n_neighbors=5)
-    model.fit(X_train, y_train)
+    knn_model = KNeighborsClassifier(n_neighbors=5)
+    knn_model.fit(X_train, y_train)
+    knn_pred = knn_model.predict(X_test)
+    knn_accuracy = accuracy_score(y_test, knn_pred)
 
-    pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, pred)
+    rf_model = RandomForestClassifier(
+        n_estimators=300,
+        max_depth=10,
+        min_samples_split=5,
+        min_samples_leaf=2,
+        random_state=42,
+        class_weight="balanced"
+    )
 
-    return model, accuracy
+    rf_model.fit(X_train, y_train)
+    rf_pred = rf_model.predict(X_test)
+    rf_accuracy = accuracy_score(y_test, rf_pred)
+
+    model_results = pd.DataFrame(
+        {
+            "Model": ["KNN Baseline", "Random Forest Enhanced"],
+            "Accuracy": [knn_accuracy, rf_accuracy],
+            "Accuracy (%)": [
+                round(knn_accuracy * 100, 2),
+                round(rf_accuracy * 100, 2)
+            ],
+            "Role in Study": [
+                "Baseline comparison model",
+                "Enhanced model using technical indicators"
+            ]
+        }
+    )
+
+    selected_model = rf_model
+    selected_accuracy = rf_accuracy
+
+    return selected_model, selected_accuracy, model_results, rf_model
 
 
 def create_report(master, model):
     latest_rows = master.sort_values("Date").groupby("Ticker").tail(1).copy()
 
-    features = latest_rows[["Close", "Volume", "Volume_Surge", "Volatility_5D"]]
+    features = latest_rows[FEATURE_COLUMNS]
 
     latest_rows["Prediction_Label"] = np.where(
         model.predict(features) == 1,
@@ -199,10 +292,13 @@ def create_report(master, model):
     )
 
     latest_rows["IPOPulse_Score"] = (
-        latest_rows["Return"].rank(pct=True) * 35 +
-        latest_rows["Volume_Surge"].rank(pct=True) * 30 +
-        latest_rows["Volume"].rank(pct=True) * 20 +
-        (1 - latest_rows["Volatility_5D"].rank(pct=True)) * 15
+        latest_rows["Return"].rank(pct=True) * 25 +
+        latest_rows["Volume_Surge"].rank(pct=True) * 20 +
+        latest_rows["Volume"].rank(pct=True) * 15 +
+        (1 - latest_rows["Volatility_5D"].rank(pct=True)) * 15 +
+        latest_rows["Momentum"].rank(pct=True) * 10 +
+        latest_rows["Price_Trend"].rank(pct=True) * 10 +
+        (1 - abs(latest_rows["RSI"] - 50).rank(pct=True)) * 5
     )
 
     latest_rows["Risk_Level"] = pd.cut(
@@ -213,8 +309,8 @@ def create_report(master, model):
     )
 
     latest_rows["AI_Assessment"] = np.where(
-        (latest_rows["IPOPulse_Score"] >= 70) &
-        (latest_rows["Prediction_Label"] == "Positive"),
+        (latest_rows["IPOPulse_Score"] >= 70)
+        & (latest_rows["Prediction_Label"] == "Positive"),
         "Attractive for further review based on model indicators.",
         np.where(
             latest_rows["IPOPulse_Score"] >= 40,
@@ -242,7 +338,13 @@ def create_report(master, model):
             "Close": "Close Price",
             "Return": "Daily Return",
             "Volume_Surge": "Volume Surge",
-            "Volatility_5D": "5-Day Volatility"
+            "Volatility_5D": "5-Day Volatility",
+            "MA5": "5-Day Moving Average",
+            "MA20": "20-Day Moving Average",
+            "RSI": "RSI",
+            "MACD": "MACD",
+            "Momentum": "Momentum",
+            "Price_Trend": "Price Trend"
         }
     )
 
@@ -262,6 +364,12 @@ def create_report(master, model):
             "Volume",
             "Volume Surge",
             "5-Day Volatility",
+            "5-Day Moving Average",
+            "20-Day Moving Average",
+            "RSI",
+            "MACD",
+            "Momentum",
+            "Price Trend",
             "Prediction_Label",
             "IPOPulse_Score",
             "Risk_Level",
@@ -291,7 +399,7 @@ countries = st.sidebar.multiselect(
 
 period = st.sidebar.selectbox(
     "Select data period",
-    ["3mo", "6mo", "1y", "2y"],
+    ["6mo", "1y", "2y", "5y"],
     index=2
 )
 
@@ -318,7 +426,7 @@ if st.button("Run IPOPulse-AI Global Analysis"):
         st.error("Feature engineering failed. Not enough data available.")
         st.stop()
 
-    model, accuracy = train_model(feature_data)
+    model, accuracy, model_results, rf_model = train_models(feature_data)
 
     report_final = create_report(feature_data, model)
 
@@ -327,8 +435,51 @@ if st.button("Run IPOPulse-AI Global Analysis"):
     col1, col2, col3 = st.columns(3)
 
     col1.metric("Tickers analyzed", len(selected_tickers))
-    col2.metric("Model accuracy", f"{accuracy * 100:.2f}%")
+    col2.metric("Selected model accuracy", f"{accuracy * 100:.2f}%")
     col3.metric("Countries", len(countries))
+
+    st.subheader("Model Accuracy Comparison")
+    st.dataframe(model_results, use_container_width=True)
+
+    expected_accuracy = pd.DataFrame(
+        {
+            "Model": [
+                "KNN",
+                "Random Forest",
+                "XGBoost",
+                "LightGBM",
+                "Neural Network"
+            ],
+            "Expected Accuracy Range": [
+                "50-60%",
+                "55-70%",
+                "60-75%",
+                "60-75%",
+                "55-70%"
+            ],
+            "Prototype Status": [
+                "Implemented",
+                "Implemented",
+                "Future Enhancement",
+                "Future Enhancement",
+                "Future Enhancement"
+            ]
+        }
+    )
+
+    st.subheader("Model Roadmap")
+    st.dataframe(expected_accuracy, use_container_width=True)
+
+    feature_importance = pd.DataFrame(
+        {
+            "Feature": FEATURE_COLUMNS,
+            "Importance": rf_model.feature_importances_
+        }
+    ).sort_values("Importance", ascending=False)
+
+    st.subheader("Random Forest Feature Importance")
+    st.dataframe(feature_importance, use_container_width=True)
+    st.bar_chart(feature_importance.set_index("Feature")["Importance"])
 
     st.subheader("IPOPulse-AI Global Assessment Report")
     st.dataframe(report_final, use_container_width=True)
@@ -337,14 +488,10 @@ if st.button("Run IPOPulse-AI Global Analysis"):
     st.dataframe(report_final.head(5), use_container_width=True)
 
     st.subheader("IPOPulse Score by Company")
-    st.bar_chart(
-        report_final.set_index("Company")["IPOPulse_Score"]
-    )
+    st.bar_chart(report_final.set_index("Company")["IPOPulse_Score"])
 
     st.subheader("Daily Return by Company")
-    st.bar_chart(
-        report_final.set_index("Company")["Daily Return"]
-    )
+    st.bar_chart(report_final.set_index("Company")["Daily Return"])
 
     csv = report_final.to_csv(index=False).encode("utf-8")
     excel = convert_df_to_excel(report_final)
