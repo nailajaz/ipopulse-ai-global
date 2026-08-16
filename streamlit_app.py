@@ -285,10 +285,15 @@ def train_models(master):
         }
     )
 
-    selected_model = rf_model
+    selected_model = best_rf
     selected_accuracy = rf_accuracy
 
-    return selected_model, selected_accuracy, model_results, rf_modeldef train_models(master):
+    return selected_model, selected_accuracy, model_results, rf_modeldef train_models(master)(
+        selected_model,
+        selected_accuracy,
+        model_results,
+        best_rf
+    )
 
     X = master[FEATURE_COLUMNS]
     y = master["Target"]
