@@ -278,7 +278,7 @@ def train_models(master):
         param_grid=knn_param_grid,
         scoring="accuracy",
         cv=cv,
-        n_jobs=-1
+        n_jobs=1
     )
 
     knn_grid.fit(X_train, y_train)
@@ -303,8 +303,8 @@ def train_models(master):
     )
 
     rf_param_grid = {
-        "n_estimators": [200, 300, 400],
-        "max_depth": [8, 10, 12],
+        "n_estimators": [200, 300],
+        "max_depth": [8, 10],
         "min_samples_split": [2, 5],
         "min_samples_leaf": [1, 2]
     }
@@ -314,7 +314,7 @@ def train_models(master):
         param_grid=rf_param_grid,
         scoring="accuracy",
         cv=cv,
-        n_jobs=-1
+        n_jobs=1
     )
 
     rf_grid.fit(X_train, y_train)
@@ -607,5 +607,7 @@ if st.button("Run IPOPulse-AI Global Analysis"):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
+else:
+    st.info("Select countries from the sidebar and click the button to run the prototype.")
 else:
     st.info("Select countries from the sidebar and click the button to run the prototype.")
