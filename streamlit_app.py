@@ -288,7 +288,211 @@ def train_models(master):
     selected_model = rf_model
     selected_accuracy = rf_accuracy
 
-    return selected_model, selected_accuracy, model_results, rf_model
+    return selected_model, selected_accuracy, model_results, rf_modeldef train_models(master):
+
+    X = master[FEATURE_COLUMNS]
+    y = master["Target"]
+
+    # ========================================================
+    # 1. 70% TRAINING / 30% INDEPENDENT TESTING
+    # ========================================================
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.30,
+        random_state=42,
+        stratify=y if y.nunique() > 1 else None
+    )
+
+    # ========================================================
+    # 2. 10-FOLD STRATIFIED CROSS-VALIDATION
+    # ========================================================
+
+    cv = StratifiedKFold(
+        n_splits=10,
+        shuffle=True,
+        random_state=42
+    )
+
+    # ========================================================
+    # 3. KNN HYPERPARAMETER TUNING
+    # ========================================================
+
+    knn = KNeighborsClassifier()
+
+    knn_param_grid = {
+        "n_neighbors": [3, 5, 7, 9, 11]
+    }
+
+    knn_grid = GridSearchCV(
+        estimator=knn,
+        param_grid=knn_param_grid,
+        scoring="accuracy",
+        cv=cv,
+        n_jobs=-1
+    )
+
+    knn_grid.fit(X_train, y_train)
+
+    best_knn = knn_grid.best_estimator_
+
+    # Final KNN predictions on independent 30% test set
+    knn_pred = best_knn.predict(X_test)
+    knn_prob = best_knn.predict_proba(X_test)[:, 1]
+
+    # KNN performance metrics
+    knn_accuracy = accuracy_score(y_test, knn_pred)
+    knn_precision = precision_score(
+        y_test,
+        knn_pred,
+        zero_division=0
+    )
+    knn_recall = recall_score(
+        y_test,
+        knn_pred,
+        zero_division=0
+    )
+    knn_f1 = f1_score(
+        y_test,
+        knn_pred,
+        zero_division=0
+    )
+    knn_auc = roc_auc_score(
+        y_test,
+        knn_prob
+    )
+
+    # Mean 10-fold CV accuracy for best KNN model
+    knn_cv_accuracy = knn_grid.best_score_
+
+    # ========================================================
+    # 4. RANDOM FOREST HYPERPARAMETER TUNING
+    # ========================================================
+
+    rf = RandomForestClassifier(
+        random_state=42,
+        class_weight="balanced"
+    )
+
+    rf_param_grid = {
+        "n_estimators": [200, 300, 400],
+        "max_depth": [8, 10, 12],
+        "min_samples_split": [2, 5],
+        "min_samples_leaf": [1, 2]
+    }
+
+    rf_grid = GridSearchCV(
+        estimator=rf,
+        param_grid=rf_param_grid,
+        scoring="accuracy",
+        cv=cv,
+        n_jobs=-1
+    )
+
+    rf_grid.fit(X_train, y_train)
+
+    best_rf = rf_grid.best_estimator_
+
+    # Final RF predictions on independent 30% test set
+    rf_pred = best_rf.predict(X_test)
+    rf_prob = best_rf.predict_proba(X_test)[:, 1]
+
+    # Random Forest performance metrics
+    rf_accuracy = accuracy_score(y_test, rf_pred)
+    rf_precision = precision_score(
+        y_test,
+        rf_pred,
+        zero_division=0
+    )
+    rf_recall = recall_score(
+        y_test,
+        rf_pred,
+        zero_division=0
+    )
+    rf_f1 = f1_score(
+        y_test,
+        rf_pred,
+        zero_division=0
+    )
+    rf_auc = roc_auc_score(
+        y_test,
+        rf_prob
+    )
+
+    # Mean 10-fold CV accuracy for best RF model
+    rf_cv_accuracy = rf_grid.best_score_
+
+    # ========================================================
+    # 5. MODEL PERFORMANCE TABLE
+    # ========================================================
+
+    model_results = pd.DataFrame({
+        "Model": [
+            "KNN Baseline",
+            "Random Forest Enhanced"
+        ],
+
+        "Accuracy (%)": [
+            round(knn_accuracy * 100, 2),
+            round(rf_accuracy * 100, 2)
+        ],
+
+        "Precision": [
+            round(knn_precision, 4),
+            round(rf_precision, 4)
+        ],
+
+        "Recall": [
+            round(knn_recall, 4),
+            round(rf_recall, 4)
+        ],
+
+        "F1-Score": [
+            round(knn_f1, 4),
+            round(rf_f1, 4)
+        ],
+
+        "ROC-AUC": [
+            round(knn_auc, 4),
+            round(rf_auc, 4)
+        ],
+
+        "10-Fold CV Accuracy (%)": [
+            round(knn_cv_accuracy * 100, 2),
+            round(rf_cv_accuracy * 100, 2)
+        ]
+    })
+
+    # ========================================================
+    # 6. DISPLAY HYPERPARAMETER RESULTS
+    # ========================================================
+
+    st.subheader("Model Validation and Hyperparameter Tuning")
+
+    st.write(
+        "Best KNN parameters:",
+        knn_grid.best_params_
+    )
+
+    st.write(
+        "Best Random Forest parameters:",
+        rf_grid.best_params_
+    )
+
+    # ========================================================
+    # 7. SELECT RANDOM FOREST FOR IPOPULSE-AI
+    # ========================================================
+
+    selected_model = best_rf
+    selected_accuracy = rf_accuracy
+
+    return (
+        selected_model,
+        selected_accuracy,
+        model_results,
+        best_rf
+    )
 
 
 def create_report(master, model):
