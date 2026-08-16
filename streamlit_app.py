@@ -609,5 +609,3 @@ if st.button("Run IPOPulse-AI Global Analysis"):
 
 else:
     st.info("Select countries from the sidebar and click the button to run the prototype.")
-else:
-    st.info("Select countries from the sidebar and click the button to run the prototype.")
