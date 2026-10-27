@@ -254,7 +254,21 @@ def train_models(master):
         random_state=42,
         stratify=y if y.nunique() > 1 else None
     )
+# Dataset distribution and majority-class baseline
+    st.subheader("Dataset Distribution and Baseline")
 
+    st.write("Training observations:", len(y_train))
+    st.write("Test observations:", len(y_test))
+
+    class_counts = pd.DataFrame({
+        "Training": y_train.value_counts().reindex([0, 1], fill_value=0),
+        "Test": y_test.value_counts().reindex([0, 1], fill_value=0)
+    })
+    class_counts.index.name = "Target Class"
+    st.dataframe(class_counts)
+
+    majority_class = y_train.mode().iloc[0]
+    baseline_accuracy = (y_test == majority_class).mean() * 100
     # ========================================================
     # 2. 10-FOLD STRATIFIED CROSS-VALIDATION
     # ========================================================
