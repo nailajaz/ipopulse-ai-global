@@ -215,12 +215,19 @@ def create_features(master):
 
     master["MACD"] = ema12 - ema26
 
-    master["Target"] = np.where(
-        master.groupby("Ticker")["Return"].shift(-1) > 0,
-        1,
-        0
+
+    # Calculate next-trading-day return for each security
+    master["Next_Return"] = (
+        master.groupby("Ticker")["Return"].shift(-1)
     )
 
+    # Remove observations without a known next-day return
+    master = master.dropna(subset=["Next_Return"]).copy()
+
+    # Create the classification target
+    master["Target"] = (
+        master["Next_Return"] > 0
+    ).astype(int)
     master = master.replace([np.inf, -np.inf], np.nan).dropna()
 
     return master
